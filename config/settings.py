@@ -178,7 +178,7 @@ DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 # ──────────────────────────────────────
 # Custom user
 # ──────────────────────────────────────
-# AUTH_USER_MODEL = "authentication.User"
+AUTH_USER_MODEL = "authentication.User"
 
 # ──────────────────────────────────────
 # Email (example using Yandex)
