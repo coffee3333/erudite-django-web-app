@@ -76,6 +76,10 @@ docker compose logs -f
 API documentation (Swagger) is available at:
 /swagger/
 
+## 📎 References
+[Erudite Documentation)](https://github.com/Ngoc901/erudite-documentation)  
+
+
 ## 🧑‍💻 Author
     Niki aka Huawei
     Brian aka Briana
