@@ -77,7 +77,7 @@ API documentation (Swagger) is available at:
 /swagger/
 
 ## 📎 References
-[Erudite Documentation)](https://github.com/Ngoc901/erudite-documentation)  
+[Erudite Documentation](https://github.com/Ngoc901/erudite-documentation)  
 
 
 ## 🧑‍💻 Author
