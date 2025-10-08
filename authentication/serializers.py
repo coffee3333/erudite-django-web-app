@@ -51,3 +51,19 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'email', 'username', 'user_bio', 'photo', 'date_joined', 'slug', 'role')
         ref_name = "AuthUserSerializer"
+
+
+class RequestOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class ConfirmOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp_code = serializers.CharField(max_length=6)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+
+class RequestEmailVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class ConfirmEmailVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
