@@ -60,3 +60,10 @@ class ConfirmOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp_code = serializers.CharField(max_length=6)
     new_password = serializers.CharField(write_only=True, min_length=8)
+
+class RequestEmailVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+class ConfirmEmailVerificationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6)
