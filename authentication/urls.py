@@ -5,6 +5,8 @@ from authentication.views.register_view import RegisterView
 from authentication.views.google_oauth import GoogleExchangeView
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from authentication.views.reset_password_view import RequestPasswordOTPView, ConfirmPasswordOTPView
+
 urlpatterns = [
     # Authentication
     path('auth/login/', LoginView.as_view(), name='login'),
@@ -18,4 +20,8 @@ urlpatterns = [
 
     # Token Refresh
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    # Password reset по OTP
+    path('auth/password/reset/request/', RequestPasswordOTPView.as_view(), name='password-reset-request'),
+    path('auth/password/reset/confirm/', ConfirmPasswordOTPView.as_view(), name='password-reset-confirm'),
 ]
