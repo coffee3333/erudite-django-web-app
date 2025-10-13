@@ -23,11 +23,11 @@ class UserRegisterSerializer(serializers.ModelSerializer):
     password2 = serializers.CharField(write_only=True, required=True, label="Confirm password")
     user_bio = serializers.CharField(required=False, allow_blank=True)
     photo = serializers.ImageField(required=False, allow_null=True)
-    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default="student")
+    # role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default="student")
 
     class Meta:
         model = User
-        fields = ('email', 'username', 'password', 'password2', 'user_bio', 'photo', 'role')
+        fields = ('email', 'username', 'password', 'password2', 'user_bio', 'photo')
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:
@@ -42,14 +42,14 @@ class UserRegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
             user_bio=validated_data.get('user_bio', ''),
             photo=validated_data.get('photo', None),
-            role = validated_data.get("role", "student")
+            # role = validated_data.get("role", "student")
         )
         return user
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'username', 'user_bio', 'photo', 'date_joined', 'slug', 'role')
+        fields = ('id', 'email', 'username', 'user_bio', 'photo', 'date_joined', 'slug')
         ref_name = "AuthUserSerializer"
 
 

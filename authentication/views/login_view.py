@@ -54,7 +54,7 @@ class LogoutView(generics.GenericAPIView):
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        refresh_token = serializer.validated_data['refresh']
+        refresh_token = serializer.validated_data['refresh_token']
 
         try:
             token = RefreshToken(refresh_token)
