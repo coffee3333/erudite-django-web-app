@@ -1,15 +1,20 @@
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.utils.text import slugify
+from django.urls import reverse
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, username, password=None, **extra_fields):
+    def create_user(self, email, username, password=None, role="student", **extra_fields):
         if not email:
             raise ValueError("Email is required")
         if not username:
             raise ValueError("Username is required")
+        if not role:
+            raise ValueError("Role is required")
+
         email = self.normalize_email(email)
-        user = self.model(email=email, username=username, **extra_fields)
+        user = self.model(email=email, username=username, role=role, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
@@ -25,10 +30,11 @@ class UserManager(BaseUserManager):
 
         return self.create_user(email, username, password, **extra_fields)
 
-from django.utils.text import slugify
-from django.urls import reverse
-
 class User(AbstractBaseUser, PermissionsMixin):
+    ROLE_CHOICES = (
+        ("student", "Student"),
+        ("teacher", "Teacher"),
+    )
     username = models.CharField(max_length=50, unique=True)
     email = models.EmailField(unique=True)
     user_bio = models.CharField(max_length=255, blank=True, null=True)
@@ -38,6 +44,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     date_joined = models.DateTimeField(default=timezone.now)
     email_verified = models.BooleanField(default=False)
     slug = models.SlugField(max_length=60, unique=True, blank=True, help_text="URL-friendly user slug.")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="student")
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
@@ -64,17 +71,19 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_short_name(self):
         return self.username
 
-    def count_followers(self):
-        return self.followers.count() if hasattr(self, 'followers') else 0
-
-    def count_following(self):
-        return self.following.count() if hasattr(self, 'following') else 0
-
-    def count_recipes(self):
-        return self.recipes.count() if hasattr(self, 'recipes') else 0
-
     def get_absolute_url(self):
         return reverse('user-detail', kwargs={'slug': self.slug})
+
+    # def count_followers(self):
+    #     return self.followers.count() if hasattr(self, 'followers') else 0
+    #
+    # def count_following(self):
+    #     return self.following.count() if hasattr(self, 'following') else 0
+    #
+    # def count_recipes(self):
+    #     return self.recipes.count() if hasattr(self, 'recipes') else 0
+    #
+
 
 
 
