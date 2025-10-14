@@ -56,11 +56,12 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.sites",
     # Third-party
+    'behave_django', # <- cucumber
     "corsheaders",
     "drf_yasg",
     "django_filters",
     "rest_framework",
-    "rest_framework.authtoken",  # keep if you need browsable API token auth
+    "rest_framework.authtoken",
     "rest_framework_simplejwt.token_blacklist",
     # Cloudinary
     "cloudinary",
