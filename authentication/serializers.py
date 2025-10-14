@@ -3,13 +3,6 @@ from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from authentication.models import User
 
-class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-
-class LogoutSerializer(serializers.Serializer):
-    refresh_token = serializers.CharField()
-
 class UserRegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(
         required=True,
@@ -23,35 +16,70 @@ class UserRegisterSerializer(serializers.ModelSerializer):
     password2 = serializers.CharField(write_only=True, required=True, label="Confirm password")
     user_bio = serializers.CharField(required=False, allow_blank=True)
     photo = serializers.ImageField(required=False, allow_null=True)
-    # role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default="student")
+    role = serializers.ChoiceField(choices=User.ROLE_CHOICES, default="student")
 
     class Meta:
         model = User
-        fields = ('email', 'username', 'password', 'password2', 'user_bio', 'photo')
+        fields = ('email', 'username', 'password', 'password2', 'user_bio', 'photo', 'role')
 
     def validate(self, attrs):
-        if attrs['password'] != attrs['password2']:
+        if attrs["password"] != attrs["password2"]:
             raise serializers.ValidationError({"password": "Password fields didn't match."})
         return attrs
 
+    def validate_role(self, value):
+        """Разрешаем только teacher или student"""
+        allowed_roles = ["student", "teacher"]
+        if value not in allowed_roles:
+            raise serializers.ValidationError("Role must be either 'student' or 'teacher'.")
+        return value
+
     def create(self, validated_data):
-        validated_data.pop('password2')
+        validated_data.pop("password2")
         user = User.objects.create_user(
-            email=validated_data['email'],
-            username=validated_data['username'],
-            password=validated_data['password'],
-            user_bio=validated_data.get('user_bio', ''),
-            photo=validated_data.get('photo', None),
-            # role = validated_data.get("role", "student")
+            email=validated_data["email"],
+            username=validated_data["username"],
+            password=validated_data["password"],
+            user_bio=validated_data.get("user_bio", ""),
+            photo=validated_data.get("photo", None),
+            role=validated_data.get("role", "student"),
         )
         return user
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+class LogoutSerializer(serializers.Serializer):
+    refresh_token = serializers.CharField()
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'username', 'user_bio', 'photo', 'date_joined', 'slug')
+        fields = ('id', 'email', 'username', 'user_bio', 'photo', 'date_joined', 'slug', 'role')
         ref_name = "AuthUserSerializer"
 
+class UserDetailSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'user_bio', 'photo', 'date_joined', 'slug')
+        ref_name = "AuthUserSerializer"
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('username', 'user_bio', 'photo')
+        extra_kwargs = {
+            'username': {'required': False},
+            'user_bio': {'required': False},
+            'photo': {'required': False}
+        }
+
+    def validate_username(self, value):
+        user = self.instance
+        if value and User.objects.exclude(pk=user.pk).filter(username=value).exists():
+            raise serializers.ValidationError("This username is already taken.")
+        return value
 
 class RequestOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()

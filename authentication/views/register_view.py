@@ -1,4 +1,4 @@
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, status, parsers
 from ..serializers import UserRegisterSerializer, UserSerializer
 from rest_framework.response import Response
 from drf_yasg.utils import swagger_auto_schema
@@ -7,7 +7,8 @@ from drf_yasg import openapi
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = UserRegisterSerializer
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = (permissions.AllowAny)
+    parser_classes = (parsers.MultiPartParser, parsers.FormParser)
 
     @swagger_auto_schema(
         operation_description="Register a new user.",

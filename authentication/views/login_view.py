@@ -21,6 +21,7 @@ class LoginView(generics.GenericAPIView):
             401: "Unauthorized: Invalid credentials"
         }
     )
+
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -62,7 +63,3 @@ class LogoutView(generics.GenericAPIView):
             return Response({"detail": "Successfully logged out."}, status=status.HTTP_205_RESET_CONTENT)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
-class SomeTestClass():
-    pass
