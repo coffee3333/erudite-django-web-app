@@ -1,6 +1,137 @@
 from rest_framework import serializers
 from django.utils.text import slugify
+from django.db.models import Avg
 from core.models.course_model import Course
+from core.models.certificate_model import Certificate
+from core.models.challenge_model import Challenge
+from core.models.submission_model import Submission
+from core.serializers.topic_serializer import TopicSerializer
+
+
+def _get_completion_pct(user, course):
+    total = Challenge.objects.filter(topic__course=course).count()
+    if total == 0:
+        return 0
+    passed = (
+        Submission.objects
+        .filter(user=user, challenge__topic__course=course, status="passed")
+        .values("challenge_id").distinct().count()
+    )
+    return round((passed / total) * 100, 1)
+
+
+class CourseListSerializer(serializers.ModelSerializer):
+    owner = serializers.ReadOnlyField(source="owner.username")
+    completion_pct = serializers.SerializerMethodField()
+    certificate = serializers.SerializerMethodField()
+    is_bookmarked = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Course
+        fields = [
+            "id",
+            "owner",
+            "title",
+            "description",
+            "language",
+            "level",
+            "status",
+            "featured_image",
+            "created_at",
+            "slug",
+            "completion_pct",
+            "certificate",
+            "is_bookmarked",
+        ]
+
+    def get_completion_pct(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        return _get_completion_pct(request.user, obj)
+
+    def get_certificate(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        cert = Certificate.objects.filter(user=request.user, course=obj).first()
+        if not cert:
+            return None
+        return {
+            "certificate_id": str(cert.certificate_id),
+            "issued_at": cert.issued_at,
+            "score_pct": cert.score_pct,
+            "pdf_download_url": request.build_absolute_uri(f"/api/platform/courses/{obj.slug}/certificate/download/"),
+        }
+
+    def get_is_bookmarked(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.bookmarks.filter(user=request.user).exists()
+
+class CourseDetailSerializer(serializers.ModelSerializer):
+    owner = serializers.ReadOnlyField(source="owner.username")
+    completion_pct = serializers.SerializerMethodField()
+    certificate = serializers.SerializerMethodField()
+    is_bookmarked = serializers.SerializerMethodField()
+    avg_rating = serializers.SerializerMethodField()
+    feedback_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Course
+        fields = [
+            "id",
+            "owner",
+            "title",
+            "description",
+            "language",
+            "level",
+            "status",
+            "featured_image",
+            "created_at",
+            "updated_at",
+            "slug",
+            "lti_token",
+            "completion_pct",
+            "certificate",
+            "is_bookmarked",
+            "avg_rating",
+            "feedback_count",
+        ]
+
+    def get_completion_pct(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        return _get_completion_pct(request.user, obj)
+
+    def get_certificate(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        cert = Certificate.objects.filter(user=request.user, course=obj).first()
+        if not cert:
+            return None
+        return {
+            "certificate_id": str(cert.certificate_id),
+            "issued_at": cert.issued_at,
+            "score_pct": cert.score_pct,
+            "pdf_download_url": request.build_absolute_uri(f"/api/platform/courses/{obj.slug}/certificate/download/"),
+        }
+
+    def get_is_bookmarked(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.bookmarks.filter(user=request.user).exists()
+
+    def get_avg_rating(self, obj):
+        result = obj.feedback.aggregate(avg=Avg("rating"))["avg"]
+        return round(result, 1) if result is not None else None
+
+    def get_feedback_count(self, obj):
+        return obj.feedback.count()
 
 class CourseUpdateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -36,7 +167,7 @@ class CourseUpdateSerializer(serializers.ModelSerializer):
 
     def validate_status(self, value):
         """Validate course status."""
-        allowed_statuses = ["draft", "published", "archived"]
+        allowed_statuses = ["draft", "published", "archived", "private"]
         if not value:
             raise serializers.ValidationError("Status is required.")
         if value not in allowed_statuses:
@@ -88,9 +219,18 @@ class CourseUpdateSerializer(serializers.ModelSerializer):
             instance.status = validated_data["status"]
             has_updates = True
 
-        if "featured_image" in validated_data and validated_data["featured_image"] != instance.featured_image:
-            instance.featured_image = validated_data["featured_image"]
-            has_updates = True
+        if "featured_image" in validated_data:
+            new_image = validated_data.get("featured_image")
+
+            if new_image is None:
+                if instance.featured_image:
+                    instance.featured_image.delete(save=False)
+                    instance.featured_image = None
+                    has_updates = True
+
+            elif new_image != instance.featured_image:
+                instance.featured_image = new_image
+                has_updates = True
 
         if has_updates:
             instance.save()
@@ -134,7 +274,7 @@ class CourseCreateSerializer(serializers.ModelSerializer):
 
     def validate_status(self, value):
         """Validate course status."""
-        allowed_statuses = ["draft", "published", "archived"]
+        allowed_statuses = ["draft", "published", "archived", "private"]
         if value not in allowed_statuses:
             raise serializers.ValidationError(
                 f"Status must be one of {', '.join(allowed_statuses)}."
@@ -154,8 +294,6 @@ class CourseCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create course and auto-generate slug if needed."""
-        request = self.context.get("request")
-
         title = validated_data.get("title")
         base_slug = slugify(title)
         slug = base_slug or "course"
@@ -164,9 +302,5 @@ class CourseCreateSerializer(serializers.ModelSerializer):
             slug = f"{base_slug}-{counter}"
             counter += 1
 
-        course = Course.objects.create(
-            slug=slug,
-            **validated_data
-        )
-
-        return course
+        validated_data["slug"] = slug
+        return super().create(validated_data)
