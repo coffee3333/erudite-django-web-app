@@ -46,3 +46,9 @@ typing_extensions==4.15.0
 uritemplate==4.2.0
 urllib3==2.5.0
 whitenoise==6.10.0
+behave-django==1.4.0
+pytest==8.3.5
+pytest-django==4.9.0
+pytest-bdd==7.3.0
+pytest-cov==6.0.0
+coverage==7.6.10

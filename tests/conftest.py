@@ -9,7 +9,6 @@ from core.models.challenge_model import Challenge
 from core.models.challenge_correct_answer import ChallengeCorrectAnswer
 from core.models.challenge_option import ChallengeOption
 from core.models.submission_model import Submission
-from core.models.enrollment_model import CourseEnrollment
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -131,7 +130,7 @@ def private_course(teacher):
         title="Private Course",
         description="A private course",
         level="beginner",
-        status="private",
+        status="published",
     )
 
 

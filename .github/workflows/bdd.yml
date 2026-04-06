@@ -3,6 +3,16 @@ on: [push, pull_request]
 jobs:
   bdd:
     runs-on: ubuntu-latest
+    env:
+      DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY || 'ci-secret-key-for-tests' }}
+      DEBUG: 'True'
+      CLOUDINARY_CLOUD_NAME: placeholder
+      CLOUDINARY_API_KEY: placeholder
+      CLOUDINARY_API_SECRET: placeholder
+      EMAIL_HOST_USER: placeholder@example.com
+      EMAIL_HOST_PASSWORD: placeholder
+      GOOGLE_CLIENT_ID: placeholder
+      GOOGLE_CLIENT_SECRET: placeholder
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4

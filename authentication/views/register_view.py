@@ -7,7 +7,7 @@ from drf_yasg import openapi
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = UserRegisterSerializer
-    permission_classes = (permissions.AllowAny)
+    permission_classes = (permissions.AllowAny,)
     parser_classes = (parsers.MultiPartParser, parsers.FormParser)
 
     @swagger_auto_schema(
