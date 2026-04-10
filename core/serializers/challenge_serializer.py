@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from core.models.challenge_model import Challenge
+from core.models.code_challenge import CodeTestCase, CodeChallengeConfig
 from core.models.topic_model import Topic
 from core.models.challenge_correct_answer import ChallengeCorrectAnswer
 from core.models.challenge_option import ChallengeOption
@@ -32,11 +33,13 @@ class ChallengeSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "body", "points", "difficulty", "photo",
             "slug", "topic_slug", "answers", "correct_answer", "case_sensitive",
+            "hint", "solution_explanation",
         ]
         read_only_fields = ["id", "slug"]
 
     def validate(self, attrs):
-        answers_list = [x.strip() for x in attrs.get("answers").split(",")]
+        raw_answers = attrs.get("answers", "") or ""
+        answers_list = [x.strip() for x in raw_answers.split(",") if x.strip()]
         attrs["_answers_list"] = answers_list
 
         correct_answer = str(attrs.get("correct_answer", "")).strip()
@@ -93,15 +96,110 @@ class ChallengeSerializer(serializers.ModelSerializer):
 
 class ChallengeListSerializer(serializers.ModelSerializer):
     options = serializers.SerializerMethodField()
+    code_language = serializers.SerializerMethodField()
+    code_template = serializers.SerializerMethodField()
+    user_status = serializers.SerializerMethodField()
+    hint_available = serializers.SerializerMethodField()
+    solution_available = serializers.SerializerMethodField()
+    user_hint_used = serializers.SerializerMethodField()
+    user_solution_revealed = serializers.SerializerMethodField()
 
     class Meta:
         model = Challenge
         fields = [
             "id", "title", "body",
-            "points", "difficulty", "photo",
-            "slug",
+            "points", "difficulty",
+            "challenge_type", "sort_order",
+            "photo", "slug",
             "options",
+            "code_language", "code_template",
+            "user_status",
+            "hint_available", "solution_available",
+            "user_hint_used", "user_solution_revealed",
         ]
 
     def get_options(self, obj):
-        return list(obj.options.values_list("text", flat=True).order_by("id"))
+        return list(obj.options.values("id", "text").order_by("id"))
+
+    def get_code_language(self, obj):
+        if obj.challenge_type == "code" and hasattr(obj, "code_config"):
+            return obj.code_config.language
+        return None
+
+    def get_code_template(self, obj):
+        if obj.challenge_type == "code" and hasattr(obj, "code_config"):
+            return obj.code_config.solution_template
+        return None
+
+    def get_user_status(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        submissions = obj.submissions.filter(user=request.user)
+        if submissions.filter(status="passed").exists():
+            return "passed"
+        if submissions.filter(status="failed").exists():
+            return "failed"
+        if submissions.filter(status="pending").exists():
+            return "pending"
+        return None
+
+    def get_hint_available(self, obj):
+        return bool(obj.hint)
+
+    def get_solution_available(self, obj):
+        return bool(obj.solution_explanation)
+
+    def _get_user_submission(self, obj):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return None
+        return obj.submissions.filter(user=request.user).first()
+
+    def get_user_hint_used(self, obj):
+        sub = self._get_user_submission(obj)
+        return sub.hint_used if sub else False
+
+    def get_user_solution_revealed(self, obj):
+        sub = self._get_user_submission(obj)
+        return sub.solution_revealed if sub else False
+
+class CodeTestCaseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CodeTestCase
+        fields = ["stdin", "expected_stdout", "is_public", "weight", "description"]
+
+class CodeConfigSerializer(serializers.ModelSerializer):
+    test_cases = CodeTestCaseSerializer(many=True, write_only=True)
+
+    class Meta:
+        model  = CodeChallengeConfig
+        fields = ["language", "solution_template", "solution_hidden",
+                  "time_limit_seconds", "memory_limit_mb", "test_cases"]
+
+class ChallengeCreateSerializer(serializers.ModelSerializer):
+    code_config = CodeConfigSerializer(required=False)
+
+    class Meta:
+        model  = Challenge
+        fields = ["topic", "title", "body", "difficulty", "points",
+                  "challenge_type", "hint", "solution_explanation", "code_config"]
+
+    def validate(self, data):
+        if data.get("challenge_type") == "code" and not data.get("code_config"):
+            raise serializers.ValidationError(
+                {"code_config": "Required when challenge_type is 'code'."}
+            )
+        return data
+
+    def create(self, validated_data):
+        config_data = validated_data.pop("code_config", None)
+        test_cases  = config_data.pop("test_cases", []) if config_data else []
+        challenge   = Challenge.objects.create(**validated_data)
+
+        if config_data:
+            config = CodeChallengeConfig.objects.create(challenge=challenge, **config_data)
+            for tc in test_cases:
+                CodeTestCase.objects.create(config=config, **tc)
+
+        return challenge
