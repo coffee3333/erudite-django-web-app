@@ -396,3 +396,35 @@ All team members are expected to be familiar with pytest and basic Django test p
 | BDD steps fall out of sync with endpoint changes | Medium | Medium | Step definitions are co-located with feature files; review on every endpoint change |
 | SonarCloud token expires or is revoked | Low | Medium | Token stored as GitHub secret `SONAR_TOKEN`; rotate if CI scan fails |
 | Test coverage stays below 60% | Medium | Medium | Expand tests to cover topic, lesson, and challenge endpoints in the next iteration |
+
+---
+
+## 13. Test Execution Screenshots
+
+### 13.1 Unit & Integration Tests (pytest)
+
+Run command:
+```bash
+DJANGO_SECRET_KEY=test DEBUG=True \
+CLOUDINARY_CLOUD_NAME=x CLOUDINARY_API_KEY=x CLOUDINARY_API_SECRET=x \
+EMAIL_HOST_USER=x@x.com EMAIL_HOST_PASSWORD=x \
+GOOGLE_CLIENT_ID=x GOOGLE_CLIENT_SECRET=x \
+.venv/bin/pytest tests/ -v
+```
+
+<!-- Paste your pytest terminal screenshot here -->
+![pytest test run](docs/screenshots/pytest_run.png)
+
+### 13.2 BDD Acceptance Tests (behave)
+
+Run command:
+```bash
+DJANGO_SECRET_KEY=test DEBUG=True \
+CLOUDINARY_CLOUD_NAME=x CLOUDINARY_API_KEY=x CLOUDINARY_API_SECRET=x \
+EMAIL_HOST_USER=x@x.com EMAIL_HOST_PASSWORD=x \
+GOOGLE_CLIENT_ID=x GOOGLE_CLIENT_SECRET=x \
+.venv/bin/python -m behave
+```
+
+<!-- Paste your behave terminal screenshot here -->
+![behave BDD run](docs/screenshots/behave_run.png)
