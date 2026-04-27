@@ -1,7 +1,7 @@
 # Factory pattern for grading challenges.
 # Instead of a long if/elif chain in the view, we look up the right
 # grader key by challenge type. Adding a new challenge type
-# only requires registering it here - the dispatch logic stays clean.
+# only requires registering it here, the dispatch logic stays clean.
 
 
 _REGISTRY = {
