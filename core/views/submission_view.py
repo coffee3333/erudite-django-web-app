@@ -15,6 +15,7 @@ from core.models.challenge_option import ChallengeOption
 from core.models.code_challenge import CodeSubmissionResult
 from core.models.submission_model import Submission
 from core.utils.completion import check_and_issue_certificate
+from core.patterns.grader_factory import GraderFactory
 
 
 def _ensure_enrolled(user, course):
@@ -229,17 +230,19 @@ class SubmitChallengeView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        if challenge.challenge_type == "quiz" and challenge.options.exists():
+        grader_key = GraderFactory.resolve(challenge.challenge_type, challenge)
+        if grader_key == "quiz_mcq":
             return self._grade_quiz(request, challenge)
-        elif challenge.challenge_type in ("text", "quiz"):
+        if grader_key == "text" or grader_key == "quiz_text":
             return self._grade_text(request, challenge)
-        elif challenge.challenge_type == "code":
+        if grader_key == "code":
             return self._grade_code(request, challenge)
-
         return Response(
             {"detail": f"Unknown challenge type: {challenge.challenge_type}"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
 
     def _next_attempt_no(self, user, challenge):
         last = (
