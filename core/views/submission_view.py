@@ -39,6 +39,43 @@ def _trigger_grade_passback(user, course, score_0_to_1: float):
     except Exception:
         pass  # never let grade passback break the submission response
 
+
+def _next_attempt_no(user, challenge):
+    """Return the next attempt number for a user/challenge pair."""
+    last = (
+        Submission.objects.filter(user=user, challenge=challenge)
+        .order_by("-attempt_no")
+        .values_list("attempt_no", flat=True)
+        .first()
+    )
+    return (last or 0) + 1
+
+
+def _finalize_and_passback(user, course, is_correct):
+    """Issue certificate and trigger grade passback if the answer is correct."""
+    if not is_correct:
+        return None
+    cert, score_changed = check_and_issue_certificate(user, course)
+    if cert and score_changed:
+        _trigger_grade_passback(user, course, cert.score_pct / 100)
+    return cert
+
+
+def _check_answer(correct_obj, answer_text):
+    """Compare answer_text against correct_obj respecting case sensitivity."""
+    correct = correct_obj.correct_answer.strip()
+    if correct_obj.case_sensitive:
+        return answer_text.strip() == correct
+    return answer_text.strip().lower() == correct.lower()
+
+
+def _calc_earned(points, is_correct, hint_used):
+    """Return points earned given correctness and hint usage."""
+    if not is_correct:
+        return 0
+    return round(points * 0.5) if hint_used else points
+
+
 # ── Reusable response schemas ────────────────────────────────────────────────
 
 _quiz_text_response = openapi.Schema(
@@ -219,21 +256,16 @@ class SubmitChallengeView(APIView):
 
         _ensure_enrolled(request.user, challenge.topic.course)
 
-        # Block submission if student already revealed the solution
-        if challenge.solution_explanation:
-            already_revealed = Submission.objects.filter(
-                user=request.user, challenge=challenge, solution_revealed=True
-            ).exists()
-            if already_revealed:
-                return Response(
-                    {"detail": "You have already revealed the solution and cannot submit this challenge anymore."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        if self._already_revealed(request.user, challenge):
+            return Response(
+                {"detail": "You have already revealed the solution and cannot submit this challenge anymore."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         grader_key = GraderFactory.resolve(challenge.challenge_type, challenge)
         if grader_key == "quiz_mcq":
             return self._grade_quiz(request, challenge)
-        if grader_key == "text" or grader_key == "quiz_text":
+        if grader_key in ("text", "quiz_text"):
             return self._grade_text(request, challenge)
         if grader_key == "code":
             return self._grade_code(request, challenge)
@@ -242,16 +274,13 @@ class SubmitChallengeView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-
-
-    def _next_attempt_no(self, user, challenge):
-        last = (
-            Submission.objects.filter(user=user, challenge=challenge)
-            .order_by("-attempt_no")
-            .values_list("attempt_no", flat=True)
-            .first()
-        )
-        return (last or 0) + 1
+    def _already_revealed(self, user, challenge):
+        """Return True if the user has already revealed the solution for this challenge."""
+        if not challenge.solution_explanation:
+            return False
+        return Submission.objects.filter(
+            user=user, challenge=challenge, solution_revealed=True
+        ).exists()
 
     # ── Quiz (MCQ) ──────────────────────────────────────────────────────────
     def _grade_quiz(self, request, challenge):
@@ -265,10 +294,7 @@ class SubmitChallengeView(APIView):
         try:
             option = challenge.options.get(id=option_id)
         except ChallengeOption.DoesNotExist:
-            return Response(
-                {"detail": "Option not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return Response({"detail": "Option not found."}, status=status.HTTP_404_NOT_FOUND)
 
         correct_obj = getattr(challenge, "correct_answer", None)
         if correct_obj is None:
@@ -277,31 +303,8 @@ class SubmitChallengeView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if correct_obj.case_sensitive:
-            is_correct = option.text.strip() == correct_obj.correct_answer.strip()
-        else:
-            is_correct = option.text.strip().lower() == correct_obj.correct_answer.strip().lower()
-
-        hint_used = bool(request.data.get("hint_used", False))
-        if is_correct:
-            earned = round(challenge.points * 0.5) if hint_used else challenge.points
-        else:
-            earned = 0
-
-        Submission.objects.create(
-            user=request.user,
-            challenge=challenge,
-            attempt_no=self._next_attempt_no(request.user, challenge),
-            answer_text=str(option_id),
-            status="passed" if is_correct else "failed",
-            score=earned,
-            hint_used=hint_used,
-            graded_at=timezone.now(),
-        )
-        cert, score_changed = check_and_issue_certificate(request.user, challenge.topic.course) if is_correct else (None, False)
-        if cert and score_changed:
-            _trigger_grade_passback(request.user, challenge.topic.course, cert.score_pct / 100)
-        return Response({"correct": is_correct, "score": earned, "certificate_issued": cert is not None})
+        is_correct = _check_answer(correct_obj, option.text)
+        return self._save_and_respond(request, challenge, str(option_id), is_correct)
 
     # ── Text match ──────────────────────────────────────────────────────────
     def _grade_text(self, request, challenge):
@@ -319,30 +322,26 @@ class SubmitChallengeView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if correct_obj.case_sensitive:
-            is_correct = answer == correct_obj.correct_answer.strip()
-        else:
-            is_correct = answer.lower() == correct_obj.correct_answer.strip().lower()
+        is_correct = _check_answer(correct_obj, answer)
+        return self._save_and_respond(request, challenge, answer, is_correct)
 
+    def _save_and_respond(self, request, challenge, answer_text, is_correct):
+        """Shared save + response logic for quiz and text submissions."""
         hint_used = bool(request.data.get("hint_used", False))
-        if is_correct:
-            earned = round(challenge.points * 0.5) if hint_used else challenge.points
-        else:
-            earned = 0
+        earned = _calc_earned(challenge.points, is_correct, hint_used)
 
         Submission.objects.create(
             user=request.user,
             challenge=challenge,
-            attempt_no=self._next_attempt_no(request.user, challenge),
-            answer_text=answer,
+            attempt_no=_next_attempt_no(request.user, challenge),
+            answer_text=answer_text,
             status="passed" if is_correct else "failed",
             score=earned,
             hint_used=hint_used,
             graded_at=timezone.now(),
         )
-        cert, score_changed = check_and_issue_certificate(request.user, challenge.topic.course) if is_correct else (None, False)
-        if cert and score_changed:
-            _trigger_grade_passback(request.user, challenge.topic.course, cert.score_pct / 100)
+
+        cert = _finalize_and_passback(request.user, challenge.topic.course, is_correct)
         return Response({"correct": is_correct, "score": earned, "certificate_issued": cert is not None})
 
     # ── Code execution ──────────────────────────────────────────────────────
@@ -361,66 +360,36 @@ class SubmitChallengeView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        language = request.data.get("language", config.language)
         test_cases = list(config.test_cases.all())
-
         if not test_cases:
             return Response(
                 {"detail": "No test cases configured for this challenge."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        language = request.data.get("language", config.language)
         submission = Submission.objects.create(
             user=request.user,
             challenge=challenge,
-            attempt_no=self._next_attempt_no(request.user, challenge),
+            attempt_no=_next_attempt_no(request.user, challenge),
             answer_text=code,
             status="pending",
         )
 
         results = run_code_challenge(
-            code,
-            language,
-            test_cases,
+            code, language, test_cases,
             time_limit_s=config.time_limit_seconds,
             memory_mb=config.memory_limit_mb,
         )
 
-        total_weight = sum(tc.weight for tc in test_cases)
-        earned_weight = 0
-        passed = 0
-
-        for r in results:
-            CodeSubmissionResult.objects.create(
-                submission=submission,
-                test_case_id=r.test_case_id,
-                status=r.status,
-                stdout=r.stdout,
-                stderr=r.stderr,
-                execution_time_ms=r.time_ms,
-            )
-            if r.status == "accepted":
-                passed += 1
-                tc = next(tc for tc in test_cases if tc.id == r.test_case_id)
-                earned_weight += tc.weight
-
-        hint_used = bool(request.data.get("hint_used", False))
+        passed, earned_weight = self._save_test_results(submission, results, test_cases)
         all_passed = passed == len(results)
-        score = round((earned_weight / total_weight) * challenge.points) if total_weight else 0
-        if hint_used and all_passed:
-            score = round(score * 0.5)
+        total_weight = sum(tc.weight for tc in test_cases)
+        score = self._calc_code_score(challenge.points, earned_weight, total_weight, all_passed, request.data)
 
-        submission.status = "passed" if all_passed else "failed"
-        submission.score = score
-        submission.hint_used = hint_used
-        submission.feedback = f"{passed}/{len(results)} test cases passed."
-        submission.graded_at = timezone.now()
-        submission.save()
+        self._finalize_submission(submission, passed, len(results), all_passed, score, request.data)
 
-        cert, score_changed = check_and_issue_certificate(request.user, challenge.topic.course) if all_passed else (None, False)
-        if cert and score_changed:
-            _trigger_grade_passback(request.user, challenge.topic.course, cert.score_pct / 100)
-
+        cert = _finalize_and_passback(request.user, challenge.topic.course, all_passed)
         return Response({
             "submission_id": submission.id,
             "status": "accepted" if all_passed else "wrong_answer",
@@ -438,6 +407,41 @@ class SubmitChallengeView(APIView):
                 for r in results
             ],
         })
+
+    def _save_test_results(self, submission, results, test_cases):
+        """Persist CodeSubmissionResult rows and return (passed_count, earned_weight)."""
+        passed = 0
+        earned_weight = 0
+        for r in results:
+            CodeSubmissionResult.objects.create(
+                submission=submission,
+                test_case_id=r.test_case_id,
+                status=r.status,
+                stdout=r.stdout,
+                stderr=r.stderr,
+                execution_time_ms=r.time_ms,
+            )
+            if r.status == "accepted":
+                passed += 1
+                tc = next(tc for tc in test_cases if tc.id == r.test_case_id)
+                earned_weight += tc.weight
+        return passed, earned_weight
+
+    def _calc_code_score(self, points, earned_weight, total_weight, all_passed, data):
+        """Calculate final score for a code submission."""
+        score = round((earned_weight / total_weight) * points) if total_weight else 0
+        if all_passed and bool(data.get("hint_used", False)):
+            score = round(score * 0.5)
+        return score
+
+    def _finalize_submission(self, submission, passed, total, all_passed, score, data):
+        """Update submission record with final grading results."""
+        submission.status = "passed" if all_passed else "failed"
+        submission.score = score
+        submission.hint_used = bool(data.get("hint_used", False))
+        submission.feedback = f"{passed}/{total} test cases passed."
+        submission.graded_at = timezone.now()
+        submission.save()
 
 
 class RevealSolutionView(APIView):
@@ -499,38 +503,31 @@ class RevealSolutionView(APIView):
 
         _ensure_enrolled(request.user, challenge.topic.course)
 
-        # Check if already passed — still show the explanation but don't mark
         already_passed = Submission.objects.filter(
             user=request.user, challenge=challenge, status="passed"
         ).exists()
 
         if not already_passed:
-            # Mark as solution_revealed — creates/updates a special submission record
-            existing_reveal = Submission.objects.filter(
-                user=request.user, challenge=challenge, solution_revealed=True
-            ).first()
-            if not existing_reveal:
-                Submission.objects.create(
-                    user=request.user,
-                    challenge=challenge,
-                    attempt_no=self._next_attempt_no(request.user, challenge),
-                    answer_text="__solution_revealed__",
-                    status="failed",
-                    score=0,
-                    solution_revealed=True,
-                    graded_at=timezone.now(),
-                )
+            self._record_reveal(request.user, challenge)
 
         return Response({"solution_explanation": challenge.solution_explanation})
 
-    def _next_attempt_no(self, user, challenge):
-        last = (
-            Submission.objects.filter(user=user, challenge=challenge)
-            .order_by("-attempt_no")
-            .values_list("attempt_no", flat=True)
-            .first()
-        )
-        return (last or 0) + 1
+    def _record_reveal(self, user, challenge):
+        """Create a sentinel submission marking the solution as revealed (once only)."""
+        already_revealed = Submission.objects.filter(
+            user=user, challenge=challenge, solution_revealed=True
+        ).exists()
+        if not already_revealed:
+            Submission.objects.create(
+                user=user,
+                challenge=challenge,
+                attempt_no=_next_attempt_no(user, challenge),
+                answer_text="__solution_revealed__",
+                status="failed",
+                score=0,
+                solution_revealed=True,
+                graded_at=timezone.now(),
+            )
 
 
 class UseHintView(APIView):
@@ -590,29 +587,23 @@ class UseHintView(APIView):
 
         _ensure_enrolled(request.user, challenge.topic.course)
 
-        # Already used hint?
         already_used = Submission.objects.filter(
             user=request.user, challenge=challenge, hint_used=True
         ).exists()
         if not already_used:
-            Submission.objects.create(
-                user=request.user,
-                challenge=challenge,
-                attempt_no=self._next_attempt_no(request.user, challenge),
-                answer_text="__hint_used__",
-                status="failed",
-                score=0,
-                hint_used=True,
-                graded_at=timezone.now(),
-            )
+            self._record_hint_used(request.user, challenge)
 
         return Response({"hint": challenge.hint})
 
-    def _next_attempt_no(self, user, challenge):
-        last = (
-            Submission.objects.filter(user=user, challenge=challenge)
-            .order_by("-attempt_no")
-            .values_list("attempt_no", flat=True)
-            .first()
+    def _record_hint_used(self, user, challenge):
+        """Create a sentinel submission marking the hint as used."""
+        Submission.objects.create(
+            user=user,
+            challenge=challenge,
+            attempt_no=_next_attempt_no(user, challenge),
+            answer_text="__hint_used__",
+            status="failed",
+            score=0,
+            hint_used=True,
+            graded_at=timezone.now(),
         )
-        return (last or 0) + 1
