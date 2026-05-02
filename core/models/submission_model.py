@@ -4,9 +4,11 @@ from django.conf import settings
 
 class Submission(models.Model):
     STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("graded", "Graded"),
-        ("rejected", "Rejected"),
+        ("pending",  "Pending"),   # created, not yet evaluated
+        ("passed",   "Passed"),    # quiz/text: correct answer | code: all test cases accepted
+        ("failed",   "Failed"),    # quiz/text: wrong answer   | code: at least one test case failed
+        ("graded",   "Graded"),    # reserved for manual/teacher grading
+        ("rejected", "Rejected"),  # invalid submission (e.g. unsupported language)
     ]
 
     challenge = models.ForeignKey(
@@ -20,6 +22,8 @@ class Submission(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     score = models.FloatField(default=0)
     feedback = models.TextField(blank=True)
+    hint_used = models.BooleanField(default=False)
+    solution_revealed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     graded_at = models.DateTimeField(null=True, blank=True)
 
