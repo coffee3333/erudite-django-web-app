@@ -15,6 +15,36 @@ from core.permissions import IsAuthorOrReadOnly, IsTeacherUser, IsEmailVerified
 from core.serializers.course_serializer import (CourseListSerializer, CourseDetailSerializer,
                                                 CourseUpdateSerializer, CourseCreateSerializer)
 
+
+def _accessible_queryset(user, qs=None):
+    """Return courses visible to the given user."""
+    if qs is None:
+        qs = Course.objects.select_related("owner")
+    if user.is_authenticated and user.is_staff:
+        return qs
+    if user.is_authenticated:
+        enrolled_ids = CourseEnrollment.objects.filter(student=user).values_list("course_id", flat=True)
+        return qs.filter(
+            Q(status="published") |
+            Q(status="private", id__in=enrolled_ids) |
+            Q(owner=user, status__in=["draft", "private", "archived"])
+        )
+    return qs.filter(status="published")
+
+
+def _check_course_access(user, obj):
+    """Raise NotFound if user cannot access the course based on its status."""
+    if obj.status in ("draft", "archived"):
+        if not user.is_authenticated or (obj.owner != user and not user.is_staff):
+            raise NotFound("Course not found.")
+    if obj.status == "private":
+        if not user.is_authenticated:
+            raise NotFound("Course not found.")
+        if not user.is_staff and obj.owner != user:
+            if not CourseEnrollment.objects.filter(course=obj, student=user).exists():
+                raise NotFound("Course not found.")
+
+
 class CourseListAPIView(generics.ListAPIView):
     serializer_class = CourseListSerializer
     permission_classes = [permissions.AllowAny]
@@ -23,18 +53,7 @@ class CourseListAPIView(generics.ListAPIView):
     pagination_class = CustomPagination
 
     def get_queryset(self):
-        user = self.request.user
-        qs = Course.objects.select_related("owner")
-        if user.is_authenticated and user.is_staff:
-            return qs
-        if user.is_authenticated:
-            enrolled_ids = CourseEnrollment.objects.filter(student=user).values_list("course_id", flat=True)
-            return qs.filter(
-                Q(status="published") |
-                Q(status="private", id__in=enrolled_ids) |
-                Q(owner=user, status__in=["draft", "private", "archived"])
-            )
-        return qs.filter(status="published")
+        return _accessible_queryset(self.request.user)
 
     @swagger_auto_schema(
         operation_description="Get all published courses with filters, sorting, and pagination.",
@@ -56,25 +75,19 @@ class CourseListAPIView(generics.ListAPIView):
         }
     )
     def get(self, request, *args, **kwargs):
-        """Retrieve all published courses with filters, sorting, and pagination."""
         try:
             queryset = self.filter_queryset(self.get_queryset())
             page = self.paginate_queryset(queryset)
             if page is not None:
                 serializer = self.get_serializer(page, many=True)
                 return self.get_paginated_response(serializer.data)
-
             serializer = self.get_serializer(queryset, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
-
         except (DjangoValidationError, DRFValidationError) as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+
 class CourseCreateView(generics.CreateAPIView):
-    """
-    Create a new course.
-    Only authenticated users can create courses.
-    """
     queryset = Course.objects.all()
     serializer_class = CourseCreateSerializer
     permission_classes = [permissions.IsAuthenticated, IsTeacherUser, IsEmailVerified]
@@ -113,8 +126,8 @@ class CourseCreateView(generics.CreateAPIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_create(self, serializer):
-        """Assign the authenticated user as the owner."""
         return serializer.save(owner=self.request.user)
+
 
 class CourseDetailAPIView(generics.RetrieveAPIView):
     serializer_class = CourseDetailSerializer
@@ -123,68 +136,22 @@ class CourseDetailAPIView(generics.RetrieveAPIView):
     swagger_schema_fields = {"tags": ["Courses"]}
 
     def get_queryset(self):
-        """Define which courses the user can access."""
-        user = self.request.user
-
-        qs = (
-            Course.objects
-            .select_related("owner")
-            .prefetch_related("topics__challenges")
+        return _accessible_queryset(
+            self.request.user,
+            Course.objects.select_related("owner").prefetch_related("topics__challenges"),
         )
 
-        if user.is_authenticated and user.is_staff:
-            return qs
-
-        if user.is_authenticated:
-            enrolled_ids = CourseEnrollment.objects.filter(student=user).values_list("course_id", flat=True)
-            return qs.filter(
-                Q(status="published") |
-                Q(status="private", id__in=enrolled_ids) |
-                Q(owner=user, status__in=["draft", "private", "archived"])
-            )
-
-        # Unauthenticated users see only published courses
-        return qs.filter(status="published")
-
     def get_object(self):
-        """Ensure restricted access for drafts, archived, and private courses."""
         obj = super().get_object()
-        user = self.request.user
-
-        # Drafts: visible only to owner or staff
-        if obj.status == "draft" and (
-            not user.is_authenticated or (obj.owner != user and not user.is_staff)
-        ):
-            raise NotFound("Course not found.")
-
-        # Archived: visible only to owner or staff
-        if obj.status == "archived" and (
-            not user.is_authenticated or (obj.owner != user and not user.is_staff)
-        ):
-            raise NotFound("Course not found.")
-
-        # Private: visible only to owner, staff, or enrolled students
-        if obj.status == "private":
-            if not user.is_authenticated:
-                raise NotFound("Course not found.")
-            if not user.is_staff and obj.owner != user:
-                if not CourseEnrollment.objects.filter(course=obj, student=user).exists():
-                    raise NotFound("Course not found.")
-
+        _check_course_access(self.request.user, obj)
         return obj
-
 
     @swagger_auto_schema(
         operation_description="Retrieve a course by slug with its topics and challenges.",
         tags=["Courses"],
         operation_summary="Course detail via slug",
         manual_parameters=[
-            openapi.Parameter(
-                "slug",
-                openapi.IN_PATH,
-                description="Course slug",
-                type=openapi.TYPE_STRING,
-            ),
+            openapi.Parameter("slug", openapi.IN_PATH, description="Course slug", type=openapi.TYPE_STRING),
         ],
         responses={
             200: CourseDetailSerializer,
@@ -192,13 +159,12 @@ class CourseDetailAPIView(generics.RetrieveAPIView):
             401: "Unauthorized",
         },
     )
-
     def get(self, request, *args, **kwargs):
-        """Retrieve course details and return clean JSON even in DEBUG mode."""
         try:
             return super().get(request, *args, **kwargs)
         except Course.DoesNotExist:
             raise NotFound("Course not found.")
+
 
 class CourseUpdateAPIView(generics.UpdateAPIView):
     serializer_class = CourseUpdateSerializer
@@ -216,9 +182,23 @@ class CourseUpdateAPIView(generics.UpdateAPIView):
             course = Course.objects.get(slug=slug)
         except Course.DoesNotExist:
             raise NotFound("Course not found.")
-
         self.check_object_permissions(self.request, course)
         return course
+
+    def _update(self, request, partial):
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance, data=request.data, partial=partial)
+            if serializer.is_valid():
+                updated_course, has_updates = serializer.save()
+                if not has_updates:
+                    return Response({"message": "No changes detected", "data": updated_course}, status=status.HTTP_200_OK)
+                return Response(updated_course, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except NotFound as e:
+            return Response({"detail": str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except PermissionDenied as e:
+            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
 
     @swagger_auto_schema(
         operation_description="Update a course by slug (full update allowed).",
@@ -244,19 +224,7 @@ class CourseUpdateAPIView(generics.UpdateAPIView):
         }
     )
     def put(self, request, *args, **kwargs):
-        try:
-            instance = self.get_object()
-            serializer = self.get_serializer(instance, data=request.data, partial=False)
-            if serializer.is_valid():
-                updated_course, has_updates = serializer.save()
-                if not has_updates:
-                    return Response({"message": "No changes detected", "data": updated_course}, status=status.HTTP_200_OK)
-                return Response(updated_course, status=status.HTTP_200_OK)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except NotFound as e:
-            return Response({"detail": str(e)}, status=status.HTTP_404_NOT_FOUND)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        return self._update(request, partial=False)
 
     @swagger_auto_schema(
         operation_description="Partially update a course (PATCH).",
@@ -282,19 +250,8 @@ class CourseUpdateAPIView(generics.UpdateAPIView):
         }
     )
     def patch(self, request, *args, **kwargs):
-        try:
-            instance = self.get_object()
-            serializer = self.get_serializer(instance, data=request.data, partial=True)
-            if serializer.is_valid():
-                updated_course, has_updates = serializer.save()
-                if not has_updates:
-                    return Response({"message": "No changes detected", "data": updated_course}, status=status.HTTP_200_OK)
-                return Response(updated_course, status=status.HTTP_200_OK)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except NotFound as e:
-            return Response({"detail": str(e)}, status=status.HTTP_404_NOT_FOUND)
-        except PermissionDenied as e:
-            return Response({"detail": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        return self._update(request, partial=True)
+
 
 class CourseDeleteAPIView(generics.DestroyAPIView):
     queryset = Course.objects.all()
@@ -308,7 +265,6 @@ class CourseDeleteAPIView(generics.DestroyAPIView):
             obj = Course.objects.get(slug=slug)
         except Course.DoesNotExist:
             raise NotFound("Course not found.")
-
         user = self.request.user
         if not (user.is_staff or obj.owner == user):
             raise PermissionDenied("You can only delete your own courses.")
@@ -322,12 +278,7 @@ class CourseDeleteAPIView(generics.DestroyAPIView):
         tags=["Courses"],
         operation_summary="Delete course by slug",
         manual_parameters=[
-            openapi.Parameter(
-                "slug",
-                openapi.IN_PATH,
-                description="Course slug",
-                type=openapi.TYPE_STRING,
-            ),
+            openapi.Parameter("slug", openapi.IN_PATH, description="Course slug", type=openapi.TYPE_STRING),
         ],
         responses={
             204: "Course and all related data deleted.",
