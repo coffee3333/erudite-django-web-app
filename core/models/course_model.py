@@ -38,6 +38,7 @@ class Course(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     slug = models.SlugField(max_length=200, unique=True)
+    completion_threshold = models.FloatField(default=100.0)
 
     class Meta:
         ordering = ("-created_at",)

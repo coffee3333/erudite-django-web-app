@@ -103,6 +103,8 @@ class ChallengeListSerializer(serializers.ModelSerializer):
     solution_available = serializers.SerializerMethodField()
     user_hint_used = serializers.SerializerMethodField()
     user_solution_revealed = serializers.SerializerMethodField()
+    hint = serializers.SerializerMethodField()
+    solution_explanation = serializers.SerializerMethodField()
 
     class Meta:
         model = Challenge
@@ -116,6 +118,7 @@ class ChallengeListSerializer(serializers.ModelSerializer):
             "user_status",
             "hint_available", "solution_available",
             "user_hint_used", "user_solution_revealed",
+            "hint", "solution_explanation",
         ]
 
     def get_options(self, obj):
@@ -135,7 +138,8 @@ class ChallengeListSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return None
-        submissions = obj.submissions.filter(user=request.user)
+        sentinel_texts = ("__hint_used__", "__solution_revealed__")
+        submissions = obj.submissions.filter(user=request.user).exclude(answer_text__in=sentinel_texts)
         if submissions.filter(status="passed").exists():
             return "passed"
         if submissions.filter(status="failed").exists():
@@ -163,6 +167,16 @@ class ChallengeListSerializer(serializers.ModelSerializer):
     def get_user_solution_revealed(self, obj):
         sub = self._get_user_submission(obj)
         return sub.solution_revealed if sub else False
+
+    def _is_owner(self, obj):
+        request = self.context.get("request")
+        return request and request.user.is_authenticated and obj.topic.course.owner == request.user
+
+    def get_hint(self, obj):
+        return obj.hint if self._is_owner(obj) else None
+
+    def get_solution_explanation(self, obj):
+        return obj.solution_explanation if self._is_owner(obj) else None
 
 class CodeTestCaseSerializer(serializers.ModelSerializer):
     class Meta:

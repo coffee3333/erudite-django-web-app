@@ -7,10 +7,8 @@ from core.permissions import IsEmailVerified
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from core.execution.executor import run_code_challenge
 from core.models.challenge_model import Challenge
 from core.models.challenge_option import ChallengeOption
-from core.models.code_challenge import CodeSubmissionResult
 from core.models.submission_model import Submission
 from core.utils.completion import check_and_issue_certificate
 from core.patterns.grader_factory import GraderFactory
@@ -190,6 +188,15 @@ class SubmitChallengeView(APIView):
 
     # ── Code execution ──────────────────────────────────────────────────────
     def _grade_code(self, request, challenge):
+        try:
+            from core.execution.executor import run_code_challenge
+            from core.models.code_challenge import CodeSubmissionResult
+        except ImportError:
+            return Response(
+                {"detail": "Code execution is not available in this environment."},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+
         code = request.data.get("code", "").strip()
         if not code:
             return Response(
