@@ -1,4 +1,5 @@
 from rest_framework import generics, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -18,12 +19,13 @@ class CourseBookmarkToggleView(APIView):
             bookmark.delete()
             return Response({"bookmarked": False})
         CourseBookmark.objects.create(course=course, user=request.user)
-        return Response({"bookmarked": True}, status=status.HTTP_201_CREATED)
+        return Response({"bookmarked": True})
 
 
 class BookmarkedCoursesView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = CourseListSerializer
+    pagination_class = PageNumberPagination
 
     def get_queryset(self):
         return Course.objects.filter(

@@ -40,6 +40,9 @@ class CourseFeedbackListView(APIView):
         serializer = CourseFeedbackSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
 
+    def post(self, request, slug):
+        return CourseFeedbackCreateView().post(request, slug)
+
 
 class CourseFeedbackCreateView(APIView):
     permission_classes = [IsAuthenticated]
