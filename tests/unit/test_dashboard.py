@@ -4,7 +4,6 @@ from core.models.submission_model import Submission
 from authentication.models import User
 
 
-@pytest.mark.skip(reason="dashboard URL not yet registered")
 @pytest.mark.django_db
 class TestDashboard:
     url = "/api/users/dashboard/"
@@ -45,7 +44,6 @@ class TestDashboard:
         assert res.data["recent_activity"] == []
 
 
-@pytest.mark.skip(reason="leaderboard URL not yet registered")
 @pytest.mark.django_db
 class TestLeaderboard:
     url = "/api/users/leaderboard/"
@@ -59,7 +57,7 @@ class TestLeaderboard:
         res = api_client.get(self.url)
         assert res.status_code == 200
 
-    def test_leaderboard_entry_has_expected_fields(self, student_client, student, challenge, published_course):
+    def test_leaderboard_entry_has_expected_fields(self, student_client, student):
         res = student_client.get(self.url)
         assert res.status_code == 200
         if res.data:
