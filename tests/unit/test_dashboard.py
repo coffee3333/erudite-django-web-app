@@ -48,10 +48,11 @@ class TestDashboard:
 class TestLeaderboard:
     url = "/api/users/leaderboard/"
 
-    def test_returns_list(self, api_client):
+    def test_returns_expected_shape(self, api_client):
         res = api_client.get(self.url)
         assert res.status_code == 200
-        assert isinstance(res.data, list)
+        assert "leaderboard" in res.data
+        assert isinstance(res.data["leaderboard"], list)
 
     def test_anonymous_can_view_leaderboard(self, api_client):
         res = api_client.get(self.url)
@@ -60,7 +61,8 @@ class TestLeaderboard:
     def test_leaderboard_entry_has_expected_fields(self, student_client, student):
         res = student_client.get(self.url)
         assert res.status_code == 200
-        if res.data:
-            entry = res.data[0]
+        lb = res.data["leaderboard"]
+        if lb:
+            entry = lb[0]
             assert "username" in entry
             assert "total_points" in entry
