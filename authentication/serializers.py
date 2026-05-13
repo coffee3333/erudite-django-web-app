@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
-from django.contrib.auth.password_validation import validate_password
 from authentication.models import User
 
 class UserRegisterSerializer(serializers.ModelSerializer):
@@ -12,7 +11,7 @@ class UserRegisterSerializer(serializers.ModelSerializer):
         required=True,
         validators=[UniqueValidator(queryset=User.objects.all())]
     )
-    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+    password = serializers.CharField(write_only=True, required=True, min_length=8)
     password2 = serializers.CharField(write_only=True, required=True, label="Confirm password")
     user_bio = serializers.CharField(required=False, allow_blank=True)
     photo = serializers.ImageField(required=False, allow_null=True)
