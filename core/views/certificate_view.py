@@ -8,7 +8,7 @@ from drf_yasg import openapi
 
 from core.models.course_model import Course
 from core.models.certificate_model import Certificate
-from core.patterns.certificate_builder import CertificateBuilder
+from core.utils.certificate_pdf import generate_certificate_pdf
 
 
 class CourseCertificateView(APIView):
@@ -99,14 +99,8 @@ class CourseCertificateDownloadView(APIView):
         if not cert:
             return Response({"detail": "Certificate not yet earned."}, status=404)
 
-        pdf_bytes = (
-            CertificateBuilder()
-            .set_recipient(cert.user)
-            .set_course(cert.course)
-            .set_certificate_id(cert.certificate_id)
-            .set_issued_at(cert.issued_at)
-            .set_score(cert.score_pct)
-            .build()
+        pdf_bytes = generate_certificate_pdf(
+            cert.user, cert.course, cert.certificate_id, cert.issued_at, cert.score_pct
         )
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="certificate_{cert.certificate_id}.pdf"'

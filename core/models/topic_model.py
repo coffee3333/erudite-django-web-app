@@ -14,6 +14,7 @@ class Topic(models.Model):
         related_name="topics",
     )
     title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
     sort_order = models.PositiveIntegerField(default=0)
     slug = models.SlugField(max_length=200, unique=True)
 

@@ -1,3 +1,4 @@
+import uuid
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
@@ -15,6 +16,7 @@ class Course(models.Model):
         ("draft", "Draft"),
         ("published", "Published"),
         ("archived", "Archived"),
+        ("private", "Private"),
     ]
 
     owner = models.ForeignKey(
@@ -35,10 +37,18 @@ class Course(models.Model):
         help_text="Featured image for the course (max 5MB, JPEG/PNG)."
     )
 
+    completion_threshold = models.PositiveSmallIntegerField(default=80)
+
+    lti_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        help_text="Unique token used by Moodle to identify this course in LTI custom parameters.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     slug = models.SlugField(max_length=200, unique=True)
-    completion_threshold = models.FloatField(default=100.0)
 
     class Meta:
         ordering = ("-created_at",)

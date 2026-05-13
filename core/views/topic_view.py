@@ -1,9 +1,6 @@
-from pydoc_data.topics import topics
-
-from allauth.idp.oidc.views import token
-from django.core.validators import slug_re
 from rest_framework import generics, permissions, status, parsers
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -13,6 +10,7 @@ from core.models.topic_model import Topic
 from core.models.challenge_model import Challenge
 from core.permissions import IsAuthorOrReadOnly, IsTeacherUser, IsEmailVerified
 from core.serializers.topic_serializer import TopicSerializer
+from core.utils.access import user_can_access_course
 
 
 class TopicListAPIView(generics.ListAPIView):
@@ -21,10 +19,12 @@ class TopicListAPIView(generics.ListAPIView):
 
     def get_queryset(self):
         course_slug = self.kwargs.get("slug")
-        get_object_or_404(Course, slug=course_slug)
+        course = get_object_or_404(Course, slug=course_slug)
+        if not user_can_access_course(self.request.user, course):
+            raise PermissionDenied("You do not have access to this course.")
         return (
             Topic.objects
-            .filter(course__slug=course_slug)
+            .filter(course=course)
             .select_related("course")
             .prefetch_related("challenges")
             .order_by("sort_order")

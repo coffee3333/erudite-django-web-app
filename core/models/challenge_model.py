@@ -9,9 +9,10 @@ class Challenge(models.Model):
         ("medium", "Medium"),
         ("hard", "Hard"),
     ]
-    CHALLENGE_TYPE_CHOICES = [
-        ("quiz", "Quiz (MCQ)"),
-        ("text", "Text answer"),
+
+    TYPE_CHOICES = [
+        ("quiz", "Quiz"),
+        ("text", "Text"),
         ("code", "Code"),
     ]
 
@@ -24,13 +25,11 @@ class Challenge(models.Model):
     difficulty = models.CharField(
         max_length=10, choices=DIFFICULTY_CHOICES, default="medium"
     )
-    challenge_type = models.CharField(
-        max_length=20, choices=CHALLENGE_TYPE_CHOICES, default="text"
-    )
-    hint = models.TextField(blank=True, null=True)
-    solution_explanation = models.TextField(blank=True, null=True)
+    challenge_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default="quiz")
     sort_order = models.PositiveIntegerField(default=0)
     photo = models.ImageField(upload_to="challenge_photos/", blank=True, null=True)
+    hint = models.TextField(blank=True, default='')
+    solution_explanation = models.TextField(blank=True, default='')
     slug = models.SlugField(max_length=200, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

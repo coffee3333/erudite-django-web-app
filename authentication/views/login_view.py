@@ -9,19 +9,51 @@ from drf_yasg import openapi
 
 
 class LoginView(generics.GenericAPIView):
+    """
+    Authenticates a user with email + password and returns a JWT token pair.
+    The access token is short-lived; use the refresh token to obtain a new one.
+    """
     serializer_class = LoginSerializer
     permission_classes = [AllowAny]
 
     @swagger_auto_schema(
-        operation_description="Login a user and return JWT tokens.",
-        tags=['Authentication / Authorization'],
+        tags=["Authentication / Authorization"],
+        operation_summary="Log in and obtain JWT tokens",
+        operation_description=(
+            "Authenticate with email and password. Returns a **JWT access token** (short-lived) "
+            "and a **refresh token** (long-lived).\n\n"
+            "- Attach the access token as `Authorization: Bearer <access>` on every protected request.\n"
+            "- When the access token expires, call `POST /api/users/token/refresh/` with the refresh token to obtain a new access token.\n"
+            "- To end the session, call `POST /api/users/auth/logout/` to blacklist the refresh token."
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["email", "password"],
+            properties={
+                "email":    openapi.Schema(type=openapi.TYPE_STRING, format="email", description="Registered email address"),
+                "password": openapi.Schema(type=openapi.TYPE_STRING, format="password", description="Account password"),
+            },
+            example={"email": "student@example.com", "password": "MyStr0ngPass!"},
+        ),
         responses={
-            200: openapi.Response("Login successful", LoginSerializer),
-            400: "Bad Request: Invalid input data",
-            401: "Unauthorized: Invalid credentials"
-        }
+            200: openapi.Response(
+                description="Login successful — returns JWT token pair",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "access":  openapi.Schema(type=openapi.TYPE_STRING, description="Short-lived JWT access token"),
+                        "refresh": openapi.Schema(type=openapi.TYPE_STRING, description="Long-lived JWT refresh token"),
+                    },
+                    example={
+                        "access":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    },
+                ),
+            ),
+            400: openapi.Response(description="Missing or invalid fields"),
+            401: openapi.Response(description="Wrong email or password"),
+        },
     )
-
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -40,22 +72,43 @@ class LoginView(generics.GenericAPIView):
 
 
 class LogoutView(generics.GenericAPIView):
+    """
+    Blacklists the provided refresh token to invalidate the session.
+    The access token remains valid until natural expiry — client should discard it.
+    """
     serializer_class = LogoutSerializer
     permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
-        operation_description="Logout a user by blacklisting the refresh token.",
-        tags=['Authentication / Authorization'],
+        tags=["Authentication / Authorization"],
+        operation_summary="Log out and blacklist the refresh token",
+        operation_description=(
+            "Invalidates the provided refresh token by adding it to the JWT blacklist. "
+            "After calling this endpoint the refresh token can no longer be used to obtain new access tokens.\n\n"
+            "The current access token remains technically valid until it naturally expires — "
+            "the client should discard it locally on logout."
+        ),
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["refresh"],
+            properties={
+                "refresh": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="The refresh token to blacklist",
+                ),
+            },
+            example={"refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."},
+        ),
         responses={
-            205: "Successfully logged out",
-            400: "Bad Request: Invalid input data",
-            401: "Unauthorized: Authentication required"
-        }
+            205: openapi.Response(description="Successfully logged out — refresh token blacklisted"),
+            400: openapi.Response(description="Invalid or already-blacklisted refresh token"),
+            401: openapi.Response(description="Not authenticated"),
+        },
     )
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        refresh_token = serializer.validated_data['refresh_token']
+        refresh_token = serializer.validated_data['refresh']
 
         try:
             token = RefreshToken(refresh_token)

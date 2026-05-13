@@ -1,7 +1,5 @@
 """
 Django settings for config project.
-
-Fixed & cleaned up for Django 4.2 + DRF + dj-rest-auth/allauth
 """
 
 from pathlib import Path
@@ -22,16 +20,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config("DJANGO_SECRET_KEY", default="change-me-in-prod")
 DEBUG = config("DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = (
-    config("ALLOWED_HOSTS", default="")
-    .split(",")
-    or ["localhost", "127.0.0.1", "[::1]"]
-)
+_allowed = config("ALLOWED_HOSTS", default="")
+ALLOWED_HOSTS = [h for h in _allowed.split(",") if h] or ["localhost", "127.0.0.1", "[::1]"]
 
 # HTTPS / proxy (needed on Heroku / Render behind reverse-proxy)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = not DEBUG
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
 CSRF_TRUSTED_ORIGINS = config(
     "CSRF_TRUSTED_ORIGINS",
     default="http://localhost:3000",
@@ -55,13 +52,14 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    "allauth",
     # Third-party
-    'behave_django', # <- cucumber
+    'behave_django',  # <- cucumber / BDD
     "corsheaders",
     "drf_yasg",
     "django_filters",
     "rest_framework",
-    "rest_framework.authtoken",
+    "rest_framework.authtoken",  # keep if you need browsable API token auth
     "rest_framework_simplejwt.token_blacklist",
     # Cloudinary
     "cloudinary",
@@ -71,6 +69,11 @@ INSTALLED_APPS = [
     # Local apps
     "authentication",
     "core",
+    "django_extensions",
+    # Celery results
+    "django_celery_results",
+    # LTI 1.3
+    "lti",
 ]
 
 SITE_ID = 1
@@ -161,8 +164,6 @@ USE_TZ = True
 
 STATIC_URL = 'api/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-
 
 # Media files
 MEDIA_URL = '/media/'
@@ -174,7 +175,15 @@ CLOUDINARY_STORAGE = {
     "API_KEY": config("CLOUDINARY_API_KEY"),
     "API_SECRET": config("CLOUDINARY_API_SECRET"),
 }
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # ──────────────────────────────────────
 # Custom user
@@ -182,12 +191,13 @@ DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 AUTH_USER_MODEL = "authentication.User"
 
 # ──────────────────────────────────────
-# Email (example using Yandex)
+# Email (Gmail SMTP)
 # ──────────────────────────────────────
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.yandex.com"
-EMAIL_PORT = 465
-EMAIL_USE_SSL = True
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
 EMAIL_HOST_USER = config("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
@@ -203,6 +213,14 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.OrderingFilter",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "600/hour" if not DEBUG else "9999/hour",
+        "user": "3000/hour" if not DEBUG else "9999/hour",
+    },
     "DATETIME_FORMAT": "%d.%m.%Y %H:%M",
     "DATE_FORMAT": "%d.%m.%Y",
     "TIME_FORMAT": "%H:%M",
@@ -212,10 +230,12 @@ REST_FRAMEWORK = {
 # Simple JWT
 # ──────────────────────────────────────
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
+    "ALGORITHM": "HS256",
+    "UPDATE_LAST_LOGIN": True,
 }
 
 # ──────────────────────────────────────
@@ -263,3 +283,37 @@ SOCIAL_AUTH_PIPELINE = (
 )
 
 SOCIAL_AUTH_ALLOW_NEW_USER = False
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ──────────────────────────────────────
+# Celery
+# ──────────────────────────────────────
+REDIS_URL = config("REDIS_URL", default="redis://localhost:6379/0")
+
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = "django-db"
+CELERY_CACHE_BACKEND = "django-cache"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    }
+}
+
+# ──────────────────────────────────────
+# LTI
+# ──────────────────────────────────────
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:5173")
+
+# Rewrite public-facing LTI platform URLs to internal Docker IPs
+# Key = what's stored in the DB, Value = internal reachable URL
+LTI_HOST_REWRITES = {
+    "http://localhost:8060": "http://172.20.0.6",
+    "https://localhost:8060": "http://172.20.0.6",
+}

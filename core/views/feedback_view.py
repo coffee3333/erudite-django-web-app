@@ -7,6 +7,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from core.models.course_model import Course
 from core.models.enrollment_model import CourseEnrollment
 from core.models.feedback_model import CourseFeedback
+from core.permissions import IsEmailVerified
 from core.serializers.feedback_serializer import CourseFeedbackSerializer
 from core.utils.access import user_can_access_course
 
@@ -40,12 +41,9 @@ class CourseFeedbackListView(APIView):
         serializer = CourseFeedbackSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
 
-    def post(self, request, slug):
-        return CourseFeedbackCreateView().post(request, slug)
-
 
 class CourseFeedbackCreateView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmailVerified]
 
     def post(self, request, slug):
         course = _get_course(slug)

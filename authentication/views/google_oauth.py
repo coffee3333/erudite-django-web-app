@@ -8,32 +8,56 @@ from drf_yasg import openapi
 
 
 class GoogleExchangeView(APIView):
+    """
+    Exchanges a Google OAuth2 access token for platform JWT tokens.
+    Creates the user account automatically on first sign-in and marks
+    the email as verified. No password is required for Google-authenticated users.
+    """
     permission_classes = [permissions.AllowAny]
 
     @swagger_auto_schema(
-        operation_description="Exchange Google OAuth access token for JWT tokens.",
-        tags=['Authentication / Authorization'],
+        tags=["Authentication / Authorization"],
+        operation_summary="Exchange a Google OAuth access token for JWT tokens",
+        operation_description=(
+            "Accepts a Google OAuth2 `access_token` obtained from the client-side Google sign-in flow "
+            "and exchanges it for a platform JWT `access` + `refresh` token pair.\n\n"
+            "If the Google account has not been seen before, a new user is created automatically "
+            "with `email_verified=True`.\n\n"
+            "**Flow:**\n"
+            "1. Frontend initiates Google sign-in and receives a Google `access_token`\n"
+            "2. Frontend calls this endpoint with that token\n"
+            "3. Platform validates the token with Google, finds or creates the user, and returns JWTs\n"
+            "4. Frontend stores the JWTs and uses the `access` token as a Bearer header"
+        ),
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            required=['access_token'],
+            required=["access_token"],
             properties={
-                'access_token': openapi.Schema(type=openapi.TYPE_STRING, description='Google OAuth2 access token')
-            }
+                "access_token": openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description="Google OAuth2 access token from the client-side sign-in",
+                ),
+            },
+            example={"access_token": "ya29.a0AfH6SMBT..."},
         ),
         responses={
             200: openapi.Response(
-                description="JWT tokens returned",
+                description="JWT tokens issued",
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        'refresh': openapi.Schema(type=openapi.TYPE_STRING),
-                        'access': openapi.Schema(type=openapi.TYPE_STRING),
-                    }
-                )
+                        "refresh": openapi.Schema(type=openapi.TYPE_STRING, description="JWT refresh token (long-lived)"),
+                        "access":  openapi.Schema(type=openapi.TYPE_STRING, description="JWT access token (short-lived)"),
+                    },
+                    example={
+                        "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                        "access":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    },
+                ),
             ),
-            400: "Bad Request: Missing access_token",
-            403: "OAuth failed or user is inactive"
-        }
+            400: openapi.Response(description="Missing or malformed access_token"),
+            403: openapi.Response(description="Google OAuth validation failed or user account is inactive"),
+        },
     )
     def post(self, request):
         token = request.data.get("access_token")
@@ -46,6 +70,10 @@ class GoogleExchangeView(APIView):
         user = backend.do_auth(token)
         if not user or not user.is_active:
             return Response({"detail": "OAuth failed"}, status=status.HTTP_403_FORBIDDEN)
+
+        if not user.email_verified:
+            user.email_verified = True
+            user.save(update_fields=["email_verified"])
 
         refresh = RefreshToken.for_user(user)
         return Response({

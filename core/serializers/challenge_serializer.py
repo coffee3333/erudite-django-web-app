@@ -32,7 +32,7 @@ class ChallengeSerializer(serializers.ModelSerializer):
         model = Challenge
         fields = [
             "id", "title", "body", "points", "difficulty", "photo",
-            "slug", "topic_slug", "answers", "correct_answer", "case_sensitive",
+            "slug", "topic_slug", "challenge_type", "answers", "correct_answer", "case_sensitive",
             "hint", "solution_explanation",
         ]
         read_only_fields = ["id", "slug"]
@@ -98,13 +98,14 @@ class ChallengeListSerializer(serializers.ModelSerializer):
     options = serializers.SerializerMethodField()
     code_language = serializers.SerializerMethodField()
     code_template = serializers.SerializerMethodField()
+    code_test_cases = serializers.SerializerMethodField()
     user_status = serializers.SerializerMethodField()
     hint_available = serializers.SerializerMethodField()
     solution_available = serializers.SerializerMethodField()
     user_hint_used = serializers.SerializerMethodField()
     user_solution_revealed = serializers.SerializerMethodField()
-    hint = serializers.SerializerMethodField()
-    solution_explanation = serializers.SerializerMethodField()
+    owner = serializers.SerializerMethodField()
+    correct_answer = serializers.SerializerMethodField()
 
     class Meta:
         model = Challenge
@@ -114,12 +115,35 @@ class ChallengeListSerializer(serializers.ModelSerializer):
             "challenge_type", "sort_order",
             "photo", "slug",
             "options",
-            "code_language", "code_template",
+            "code_language", "code_template", "code_test_cases",
             "user_status",
             "hint_available", "solution_available",
             "user_hint_used", "user_solution_revealed",
+            "owner", "correct_answer",
             "hint", "solution_explanation",
         ]
+
+    def get_owner(self, obj):
+        # Challenge model has no direct owner — it belongs to a topic which belongs to a course
+        if hasattr(obj, "topic") and obj.topic and hasattr(obj.topic, "owner") and obj.topic.owner:
+            return obj.topic.owner.username
+        return None
+
+    def get_correct_answer(self, obj):
+        request = self.context.get("request")
+        # Only expose correct answer to the course owner (teacher)
+        if not request or not request.user.is_authenticated:
+            return None
+        try:
+            topic_owner = obj.topic.owner
+        except Exception:
+            return None
+        if request.user != topic_owner:
+            return None
+        ca = getattr(obj, "correct_answer", None)
+        if ca is None:
+            return None
+        return {"answer": ca.correct_answer, "case_sensitive": ca.case_sensitive}
 
     def get_options(self, obj):
         return list(obj.options.values("id", "text").order_by("id"))
@@ -134,12 +158,24 @@ class ChallengeListSerializer(serializers.ModelSerializer):
             return obj.code_config.solution_template
         return None
 
+    def get_code_test_cases(self, obj):
+        request = self.context.get("request")
+        if obj.challenge_type != "code" or not hasattr(obj, "code_config"):
+            return None
+        # Only expose test cases to the owner (teacher)
+        try:
+            topic_owner = obj.topic.owner
+        except Exception:
+            return None
+        if not request or not request.user.is_authenticated or request.user != topic_owner:
+            return None
+        return list(obj.code_config.test_cases.values("id", "stdin", "expected_stdout", "is_public"))
+
     def get_user_status(self, obj):
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
             return None
-        sentinel_texts = ("__hint_used__", "__solution_revealed__")
-        submissions = obj.submissions.filter(user=request.user).exclude(answer_text__in=sentinel_texts)
+        submissions = obj.submissions.filter(user=request.user)
         if submissions.filter(status="passed").exists():
             return "passed"
         if submissions.filter(status="failed").exists():
@@ -167,16 +203,6 @@ class ChallengeListSerializer(serializers.ModelSerializer):
     def get_user_solution_revealed(self, obj):
         sub = self._get_user_submission(obj)
         return sub.solution_revealed if sub else False
-
-    def _is_owner(self, obj):
-        request = self.context.get("request")
-        return request and request.user.is_authenticated and obj.topic.course.owner == request.user
-
-    def get_hint(self, obj):
-        return obj.hint if self._is_owner(obj) else None
-
-    def get_solution_explanation(self, obj):
-        return obj.solution_explanation if self._is_owner(obj) else None
 
 class CodeTestCaseSerializer(serializers.ModelSerializer):
     class Meta:

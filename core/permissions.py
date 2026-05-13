@@ -9,7 +9,18 @@ class IsAuthorOrReadOnly(BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in SAFE_METHODS:
             return True
-        return getattr(obj, 'owner', None) == request.user
+
+        # Если у объекта есть прямой owner
+        if hasattr(obj, "owner"):
+            return obj.owner == request.user
+
+        # Если объект связан с курсом, у которого есть владелец
+        if hasattr(obj, "course") and hasattr(obj.course, "owner"):
+            return obj.course.owner == request.user
+
+        # По умолчанию — запрет
+        return False
+
 
 class IsTeacherUser(permissions.BasePermission):
     """

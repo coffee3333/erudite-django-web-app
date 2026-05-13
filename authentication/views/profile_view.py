@@ -38,6 +38,12 @@ class MeProfileUpdateView(generics.UpdateAPIView):
         responses={200: UserProfileUpdateSerializer, 400: "Bad Request"}
     )
     def patch(self, request, *args, **kwargs):
+        if request.data.get("remove_photo") == "1":
+            user = self.get_object()
+            if user.photo:
+                user.photo.delete(save=False)
+                user.photo = None
+                user.save(update_fields=["photo"])
         return self.partial_update(request, *args, **kwargs)
 
     def get_object(self):

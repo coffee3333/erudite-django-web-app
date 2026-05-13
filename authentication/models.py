@@ -38,13 +38,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     username = models.CharField(max_length=50, unique=True)
     email = models.EmailField(unique=True)
     user_bio = models.CharField(max_length=255, blank=True, null=True)
-    photo = models.ImageField(upload_to='user_photos/', blank=True, null=True, default='user_photos/default_mdlthc.png')
+    photo = models.ImageField(upload_to='user_photos/', blank=True, null=True)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     date_joined = models.DateTimeField(default=timezone.now)
     email_verified = models.BooleanField(default=False)
     slug = models.SlugField(max_length=60, unique=True, blank=True, help_text="URL-friendly user slug.")
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="student")
+    moodle_platform = models.CharField(max_length=200, blank=True, null=True, help_text="Moodle/LTI platform identifier. Set means username is managed externally.")
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
@@ -104,4 +105,4 @@ class EmailVerificationCode(models.Model):
     is_used = models.BooleanField(default=False)
 
     def is_valid(self):
-        return not self.is_used and (timezone.now() - self.created_at).seconds < 600
+        return not self.is_used and (timezone.now() - self.created_at).total_seconds() < 600

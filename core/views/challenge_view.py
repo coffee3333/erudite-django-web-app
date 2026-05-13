@@ -9,10 +9,12 @@ from core.serializers.challenge_serializer import (
 )
 from core.models.topic_model import Topic
 from core.models.challenge_model import Challenge
+from core.models.code_challenge import CodeChallengeConfig, CodeTestCase
 from core.models.submission_model import Submission
 from core.permissions import IsTeacherUser, IsEmailVerified
 from core.utils.access import user_can_access_course
 from django.shortcuts import get_object_or_404
+import json
 
 
 class ChallengeCreateAPIView(generics.CreateAPIView):
@@ -108,7 +110,7 @@ class ChallengeListAPIView(generics.ListAPIView):
         return (
             Challenge.objects
             .filter(topic=topic)
-            .select_related("topic", "correct_answer", "code_config")
+            .select_related("topic", "topic__owner", "correct_answer", "code_config")
             .prefetch_related("options", "submissions")
             .order_by("sort_order", "id")
         )
@@ -284,3 +286,112 @@ class RevealSolutionView(APIView):
             )
 
         return Response({"solution_explanation": challenge.solution_explanation})
+
+
+class ChallengeUpdateAPIView(APIView):
+    """PATCH /platform/challenges/<slug>/update/ — update a challenge."""
+    permission_classes = [permissions.IsAuthenticated, IsTeacherUser, IsEmailVerified]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+
+    def patch(self, request, slug):
+        challenge = get_object_or_404(
+            Challenge.objects.select_related("topic__owner", "correct_answer", "code_config"),
+            slug=slug,
+        )
+
+        if challenge.topic.owner != request.user:
+            raise PermissionDenied("You do not own this challenge.")
+
+        data = request.data
+
+        if "title" in data:
+            challenge.title = data["title"]
+        if "body" in data:
+            challenge.body = data["body"]
+        if "difficulty" in data:
+            challenge.difficulty = data["difficulty"]
+        if "points" in data:
+            challenge.points = int(data["points"])
+        if "hint" in data:
+            challenge.hint = data.get("hint", "")
+        if "solution_explanation" in data:
+            challenge.solution_explanation = data.get("solution_explanation", "")
+        if "photo" in data:
+            challenge.photo = data["photo"]
+
+        challenge.save()
+
+        if challenge.challenge_type == "code":
+            # Update code config fields
+            config, _ = CodeChallengeConfig.objects.get_or_create(challenge=challenge)
+            if "code_language" in data:
+                config.language = data["code_language"]
+            if "code_template" in data:
+                config.solution_template = data["code_template"]
+            config.save()
+
+            # Replace test cases if provided (JSON string or list)
+            if "test_cases" in data:
+                raw = data["test_cases"]
+                if isinstance(raw, str):
+                    try:
+                        test_cases = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        return Response({"test_cases": "Invalid JSON."}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    test_cases = raw
+
+                config.test_cases.all().delete()
+                for tc in test_cases:
+                    CodeTestCase.objects.create(
+                        config=config,
+                        stdin=tc.get("stdin", ""),
+                        expected_stdout=tc.get("expected_stdout", ""),
+                        is_public=tc.get("is_public", False),
+                    )
+
+        else:
+            # Update correct answer (quiz / text only)
+            correct_answer = data.get("correct_answer", "").strip()
+            case_sensitive = str(data.get("case_sensitive", "false")).lower() in ("true", "1")
+            if correct_answer:
+                ca, _ = challenge.correct_answer.__class__.objects.get_or_create(challenge=challenge)
+                ca.correct_answer = correct_answer
+                ca.case_sensitive = case_sensitive
+                ca.save()
+
+            if challenge.challenge_type == "quiz" and "answers" in data:
+                answers_raw = data.get("answers", "")
+                answers_list = [a.strip() for a in answers_raw.split(",") if a.strip()]
+                if answers_list:
+                    from core.models.challenge_option import ChallengeOption
+                    challenge.options.all().delete()
+                    ChallengeOption.objects.bulk_create([
+                        ChallengeOption(challenge=challenge, text=a) for a in answers_list
+                    ])
+
+        serializer = ChallengeListSerializer(
+            Challenge.objects.select_related("topic__owner", "correct_answer", "code_config")
+                             .prefetch_related("options", "submissions", "code_config__test_cases")
+                             .get(pk=challenge.pk),
+            context={"request": request}
+        )
+        return Response(serializer.data)
+
+
+class ChallengeDeleteAPIView(generics.DestroyAPIView):
+    """DELETE /platform/challenges/<slug>/delete/ — delete a challenge."""
+    permission_classes = [permissions.IsAuthenticated, IsTeacherUser, IsEmailVerified]
+    lookup_field = "slug"
+
+    def get_queryset(self):
+        return Challenge.objects.select_related("topic__owner")
+
+    def get_object(self):
+        challenge = get_object_or_404(
+            Challenge.objects.select_related("topic__owner"),
+            slug=self.kwargs["slug"],
+        )
+        if challenge.topic.owner != self.request.user:
+            raise PermissionDenied("You do not own this challenge.")
+        return challenge

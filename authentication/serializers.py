@@ -51,18 +51,12 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
 
 class LogoutSerializer(serializers.Serializer):
-    refresh_token = serializers.CharField()
+    refresh = serializers.CharField()
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'username', 'user_bio', 'photo', 'date_joined', 'slug', 'role')
-        ref_name = "AuthUserSerializer"
-
-class UserDetailSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ('id', 'username', 'user_bio', 'photo', 'date_joined', 'slug')
+        fields = ('id', 'username', 'user_bio', 'photo', 'date_joined', 'email_verified', 'slug', 'role', 'moodle_platform')
         ref_name = "AuthUserSerializer"
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -81,6 +75,30 @@ class UserProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("This username is already taken.")
         return value
 
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('username', 'user_bio', 'photo')
+        extra_kwargs = {
+            'username': {'required': False},
+            'user_bio': {'required': False},
+            'photo': {'required': False},
+        }
+
+    def validate_username(self, value):
+        user = self.instance
+        if user.moodle_platform:
+            raise serializers.ValidationError("Username cannot be changed for Moodle-linked accounts.")
+        if value and User.objects.exclude(pk=user.pk).filter(username=value).exists():
+            raise serializers.ValidationError("This username is already taken.")
+        return value
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from authentication.utils import safe_photo_url
+        data['photo'] = safe_photo_url(instance)
+        return data
+
 class RequestOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
@@ -93,5 +111,4 @@ class RequestEmailVerificationSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
 class ConfirmEmailVerificationSerializer(serializers.Serializer):
-    email = serializers.EmailField()
     code = serializers.CharField(max_length=6)

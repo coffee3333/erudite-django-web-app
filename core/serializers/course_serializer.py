@@ -157,7 +157,10 @@ class CourseUpdateSerializer(serializers.ModelSerializer):
     # ---------- VALIDATIONS ----------
 
     def validate_featured_image(self, value):
-        """Validate uploaded image size and format."""
+        """Validate uploaded image size and format. An empty string means 'remove image'."""
+        # Empty string sent by the frontend means the user wants to clear the image
+        if value == "" or value == b"" or value is None:
+            return None
         if value:
             if value.size > 5 * 1024 * 1024:  # 5MB limit
                 raise serializers.ValidationError("Image size must not exceed 5MB.")

@@ -1,4 +1,4 @@
-version: '3.10'
+version: '3.18'
 
 services:
   db:
@@ -7,16 +7,30 @@ services:
     env_file:
       - .env
     volumes:
-      - ./postgres:/var/lib/postgresql/data
+      - ./postgres:/var/lib/postgresql
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web:
     build: .
     command: >
       bash -c "./wait-for-it.sh db:5432 -- \
+      ./wait-for-it.sh redis:6379 -- \
       python manage.py collectstatic --no-input && \
       python manage.py migrate && \
       python manage.py createsuperuser --no-input || true && \
       gunicorn config.wsgi:application -w 4 -b 0.0.0.0:8080"
+    environment:
+      - PYTHONWARNINGS=ignore::urllib3.exceptions.NotOpenSSLWarning,ignore::requests.packages.urllib3.exceptions.DependencyWarning,ignore
     volumes:
       - .:/app
       - ./static:/app/static
@@ -25,5 +39,35 @@ services:
       - "8080:8080"
     depends_on:
       - db
+      - redis
     env_file:
       - .env
+    networks:
+      - default
+      - erudite-app_default
+
+  celery:
+    build: .
+    command: >
+      bash -c "./wait-for-it.sh redis:6379 -- \
+      celery -A config worker --loglevel=info"
+    environment:
+      - PYTHONWARNINGS=ignore
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+    restart: always
+    networks:
+      - default
+      - moodle-app_default
+
+networks:
+  moodle-app_default:
+    external: true
+  erudite-app_default:
+    external: true
