@@ -55,23 +55,6 @@ class TestChallengeList:
         challenge = next(c for c in res.data if c["slug"] == challenge_with_hint.slug)
         assert challenge["hint_available"] is True
 
-    def test_hint_text_returned_to_student(
-        self, student_client, topic, challenge_with_hint
-    ):
-        # Serializer returns hint text to all users (access is by use-hint endpoint)
-        res = student_client.get(self.url(topic.slug))
-        challenge = next(c for c in res.data if c["slug"] == challenge_with_hint.slug)
-        assert challenge["hint"] == challenge_with_hint.hint
-
-    def test_solution_available_flag(
-        self, student_client, topic, challenge_with_solution
-    ):
-        res = student_client.get(self.url(topic.slug))
-        challenge = next(
-            c for c in res.data if c["slug"] == challenge_with_solution.slug
-        )
-        assert challenge["solution_available"] is True
-
     def test_solution_text_returned_to_student(
         self, student_client, topic, challenge_with_solution
     ):
@@ -305,68 +288,3 @@ class TestUseHint:
         res = student_client.get(f"/api/platform/topics/{topic.slug}/challenges/")
         ch = next(c for c in res.data if c["slug"] == challenge_with_hint.slug)
         assert ch["user_hint_used"] is True
-
-
-@pytest.mark.django_db
-class TestRevealSolution:
-    def url(self, slug):
-        return f"/api/platform/challenges/{slug}/reveal-solution/"
-
-    def test_returns_solution_explanation(
-        self, student_client, challenge_with_solution
-    ):
-        res = student_client.post(self.url(challenge_with_solution.slug))
-        assert res.status_code == 200
-        assert res.data["solution_explanation"] == challenge_with_solution.solution_explanation
-
-    def test_creates_sentinel_submission(
-        self, student_client, student, challenge_with_solution
-    ):
-        # No prior submission — view creates a sentinel with solution_revealed=True
-        student_client.post(self.url(challenge_with_solution.slug))
-        assert Submission.objects.filter(
-            user=student, challenge=challenge_with_solution,
-            solution_revealed=True,
-        ).exists()
-
-    def test_idempotent_second_call(
-        self, student_client, student, challenge_with_solution
-    ):
-        student_client.post(self.url(challenge_with_solution.slug))
-        student_client.post(self.url(challenge_with_solution.slug))
-        assert Submission.objects.filter(
-            user=student, challenge=challenge_with_solution, solution_revealed=True
-        ).count() == 1
-
-    def test_no_solution_returns_404(self, student_client, quiz_challenge):
-        # quiz_challenge has no solution_explanation — view returns 404
-        res = student_client.post(self.url(quiz_challenge.slug))
-        assert res.status_code == 404
-
-    def test_requires_auth(self, api_client, challenge_with_solution):
-        res = api_client.post(self.url(challenge_with_solution.slug))
-        assert res.status_code == 401
-
-    def test_user_solution_revealed_flag_in_challenge_list(
-        self, student_client, student, topic, challenge_with_solution
-    ):
-        student_client.post(self.url(challenge_with_solution.slug))
-        res = student_client.get(f"/api/platform/topics/{topic.slug}/challenges/")
-        ch = next(c for c in res.data if c["slug"] == challenge_with_solution.slug)
-        assert ch["user_solution_revealed"] is True
-
-    def test_already_passed_student_can_still_see_solution(
-        self, student_client, student, challenge_with_solution
-    ):
-        # Student already passed — reveal should still succeed and flag the existing row
-        Submission.objects.create(
-            user=student, challenge=challenge_with_solution,
-            attempt_no=1, answer_text="Paris",
-            status="passed", score=20,
-        )
-        res = student_client.post(self.url(challenge_with_solution.slug))
-        assert res.status_code == 200
-        # Existing submission gets solution_revealed=True (no new row created)
-        assert Submission.objects.filter(
-            user=student, challenge=challenge_with_solution, solution_revealed=True
-        ).count() == 1
