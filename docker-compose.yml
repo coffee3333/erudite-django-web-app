@@ -26,6 +26,7 @@ services:
       bash -c "./wait-for-it.sh db:5432 -- \
       ./wait-for-it.sh redis:6379 -- \
       python manage.py collectstatic --no-input && \
+      python manage.py makemigrations authentication core lti && \
       python manage.py migrate && \
       python manage.py createsuperuser --no-input || true && \
       gunicorn config.wsgi:application -w 4 -b 0.0.0.0:8080"
