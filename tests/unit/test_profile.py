@@ -29,17 +29,17 @@ class TestUpdateProfile:
     url = "/api/users/profile/me/update/"
 
     def test_update_username(self, student_client):
-        res = student_client.patch(self.url, {"username": "newname123"}, format="json")
+        res = student_client.patch(self.url, {"username": "newname123"}, format="multipart")
         assert res.status_code == 200
         assert res.data["username"] == "newname123"
 
     def test_update_bio(self, student_client):
-        res = student_client.patch(self.url, {"user_bio": "Hello world"}, format="json")
+        res = student_client.patch(self.url, {"user_bio": "Hello world"}, format="multipart")
         assert res.status_code == 200
         assert res.data["user_bio"] == "Hello world"
 
     def test_update_duplicate_username_returns_400(self, student_client, teacher):
-        res = student_client.patch(self.url, {"username": teacher.username}, format="json")
+        res = student_client.patch(self.url, {"username": teacher.username}, format="multipart")
         assert res.status_code == 400
 
     def test_remove_photo_sets_null(self, student_client, student):
