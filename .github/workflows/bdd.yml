@@ -19,5 +19,6 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
+      - run: python manage.py makemigrations authentication core lti
       - run: python manage.py migrate
       - run: pytest tests/
