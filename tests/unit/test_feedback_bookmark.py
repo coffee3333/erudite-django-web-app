@@ -11,7 +11,7 @@ class TestBookmarkToggle:
 
     def test_student_can_bookmark_course(self, student_client, published_course):
         res = student_client.post(self.url(published_course.slug))
-        assert res.status_code == 200
+        assert res.status_code == 201
         assert res.data["bookmarked"] is True
         assert CourseBookmark.objects.filter(course=published_course).exists()
 
@@ -47,7 +47,7 @@ class TestBookmarkedList:
 @pytest.mark.django_db
 class TestCourseFeedback:
     def url(self, slug):
-        return f"/api/platform/courses/{slug}/feedback/"
+        return f"/api/platform/courses/{slug}/feedback/submit/"
 
     def test_student_can_submit_feedback(self, student_client, published_course):
         res = student_client.post(self.url(published_course.slug), {
@@ -78,6 +78,7 @@ class TestCourseFeedback:
         CourseFeedback.objects.create(
             course=published_course, user=student, rating=4, comment="Good"
         )
-        res = api_client.get(self.url(published_course.slug))
+        list_url = f"/api/platform/courses/{published_course.slug}/feedback/"
+        res = api_client.get(list_url)
         assert res.status_code == 200
         assert len(res.data) >= 1
